@@ -3,7 +3,7 @@ import jax
 import typing as tp
 from dataclasses import dataclass, field
 import jax.tree_util as jtu
-from jax.sharding import PartitionSpec as P
+from jax import P
 
 
 @jtu.register_dataclass
