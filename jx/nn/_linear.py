@@ -30,10 +30,10 @@ class Linear(eq.Module):
         weight_pspec: tp.Optional[P] = None,
         bias: bool = True,
         dtype: tp.Optional[DTypeLike] = None,
-        rngs: PRNGKeyArray,
+        key: PRNGKeyArray,
     ):
 
-        wkey, bkey = jax.random.split(rngs, 2)
+        wkey, bkey = jax.random.split(key, 2)
         wvalue = default_init(wkey, (out_features, in_features), dtype=dtype)
         self.weight = Darray(wvalue, weight_pspec)
 
@@ -47,7 +47,12 @@ class Linear(eq.Module):
         self.dtype = dtype
 
 
-    def __call__(self, inputs: Array) -> Array:
+    def __call__(
+        self,
+        inputs: Array,
+        *, 
+        rngs: PRNGKeyArray | None = None
+    ) -> Array:
         w = self.weight.value
         y =  w @ inputs #(out feat, in_feat) (in_feat, )
         if self.bias:

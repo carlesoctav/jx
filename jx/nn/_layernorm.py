@@ -31,27 +31,37 @@ class LayerNorm(eq.Module):
         weight_pspec: P | None = None,
         bias_pspec: P | None = None,
         dtype: DTypeLike = jnp.float32,
-        rngs: PRNGKeyArray | None = None,
+        key: PRNGKeyArray | None = None,
     ):
         self.elementwise_affine = elementwise_affine
         self.normalized_shape = (normalized_shape,) if isinstance(normalized_shape, int) else normalized_shape
         self.eps = eps
         self.dtype = dtype
 
-        if rngs is None:
-            rngs = jax.random.PRNGKey(0)
+        if key is None:
+            key = jax.random.PRNGKey(0)
 
 
         if self.elementwise_affine:
-            wkey, bkey = jax.random.split(rngs, 2)
+            wkey, bkey = jax.random.split(key, 2)
             wvalue = ones_init(wkey, normalized_shape, dtype=dtype)
+            self.weight = Darray(wvalue, weight_pspec)
             if bias:
                 bvalue = zeros_init(bkey, normalized_shape, dtype=dtype)
-            self.weight = Darray(wvalue, weight_pspec)
-            self.bias = Darray(bvalue, bias_pspec)
+                self.bias = Darray(bvalue, bias_pspec)
+            else:
+                self.bias = None
+        else:
+            self.weight = None
+            self.bias = None
 
 
-    def __call__(self, x: Array) -> Array:
+    def __call__(
+        self,
+        x: Array,
+        *,
+        rngs: PRNGKeyArray | None = None
+    ) -> Array:
         if x.shape != self.normalized_shape:
             raise ValueError(
                 f"Input shape {x.shape} does not match normalized shape {self.normalized_shape}"
@@ -60,14 +70,14 @@ class LayerNorm(eq.Module):
         mean = jnp.mean(x, keepdims=True) 
         var = jnp.var(x, keepdims=True)
         var = jnp.maximum(var, 0.0)
-        inv = lax.rsqrt(var - self.eps)
-        y = (x - mean) / inv 
+        inv = lax.rsqrt(var + self.eps)  # Fixed: should be + not -
+        y = (x - mean) * inv  # Fixed: should be * not /
 
-        if self.weight:
-            out = self.weight.value * y
-        if self.bias:
-            out = out + self.bias.value
+        if self.weight is not None:
+            y = self.weight.value * y
+        if self.bias is not None:
+            y = y + self.bias.value
 
-        return out
+        return y
 
 

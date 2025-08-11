@@ -51,7 +51,12 @@ class Embedding(eq.Module, strict=True):
 
         self.dtype = dtype or self.weight.value.dtype
 
-    def __call__(self, x: Int[Array, " seq_len"]) -> Array:
+    def __call__(
+        self,
+        x: Int[Array, " seq_len"],
+        *,
+        rngs: PRNGKeyArray | None = None
+    ) -> Array:
         if is_array_like(x) and jnp.shape(x) == ():
             return self.weight.value[x]
         else:

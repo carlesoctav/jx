@@ -1,10 +1,12 @@
-import equinox as eq
 
-import typing as tp
-import jax.numpy as jnp
+import equinox as eq
 import jax
+import jax.numpy as jnp
 from jax import lax
 from jaxtyping import PRNGKeyArray
+
+from jx._darray import first_from
+
 
 Array = jax.Array
 
@@ -41,25 +43,31 @@ class Dropout(eq.Module):
         self, 
         x: Array, 
         *, 
-        rngs: PRNGKeyArray | None = None,
+        key: PRNGKeyArray | None = None,
         inference: bool | None = None
     ) -> Array:
 
-        is_inference = inference if inference is not None else self.inference
+        inference = first_from(
+            inference,
+            self.inference,
+            error_msg="""No `inference` argument was provided to Dropout 
+                as either a __call__ argument or class attribute""",
+        )
+
         
-        if is_inference: 
+        if inference: 
             return x 
 
-        if not is_inference and rngs is None:
+        if not inference and key is None:
             raise RuntimeError(
-                "Dropout requires a key when running in non-deterministic mode."
+                "Dropout requires a key when running in non-inference mode."
             )
 
         if self.p == 1.0:
             return jnp.zeros_like(x)
         
         keep_prob = 1.0 - lax.stop_gradient(self.p) 
-        mask = jax.random.bernoulli(rngs, keep_prob, shape=x.shape)
+        mask = jax.random.bernoulli(key, keep_prob, shape=x.shape)
         output = jnp.where(mask, x / keep_prob, 0.0)
         
         return output
