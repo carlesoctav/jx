@@ -14,15 +14,13 @@ Array = jax.Array
 default_init = lecun_uniform()
 
 
-#TODO: dtype is usselss for now
 class Linear(eq.Module):
     weight: Darray
     bias: Darray | None
     in_features: int = field(static=True)
     out_features: int = field(static=True)
-    use_bias: bool = field(static=True)
+    bias: bool = field(static=True)
     dtype: DTypeLike = field(static = True)
-    param_dtype: DTypeLike = field(static = True)
 
     def __init__(
         self,
@@ -30,25 +28,23 @@ class Linear(eq.Module):
         out_features: int,
         *,
         weight_pspec: tp.Optional[P] = None,
-        use_bias: bool = True,
+        bias: bool = True,
         dtype: tp.Optional[DTypeLike] = None,
-        param_dtype: DTypeLike = jnp.float32,
-        key: PRNGKeyArray,
+        rngs: PRNGKeyArray,
     ):
 
-        wkey, bkey = jax.random.split(key, 2)
-        wvalue = default_init(wkey, (out_features, in_features), param_dtype)
+        wkey, bkey = jax.random.split(rngs, 2)
+        wvalue = default_init(wkey, (out_features, in_features), dtype=dtype)
         self.weight = Darray(wvalue, weight_pspec)
 
-        if use_bias:
-            bvalue = zeros_init(bkey, (out_features,), dtype=param_dtype)
+        if bias:
+            bvalue = zeros_init(bkey, (out_features,), dtype=dtype)
             self.bias = Darray(bvalue)
 
         self.in_features = in_features
         self.out_features = out_features
-        self.use_bias = use_bias
-        self.dtype = dtype or self.weight.value.dtype
-        self.param_dtype = param_dtype 
+        self.bia = bias
+        self.dtype = dtype
 
 
     def __call__(self, inputs: Array) -> Array:

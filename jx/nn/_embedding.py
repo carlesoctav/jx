@@ -23,12 +23,12 @@ default_init = normal()
 # lookup table
 # [num_embedding, embedding_dim]
 #TODO: dtype is useless for now
+
 class Embedding(eq.Module, strict=True):
     weight: Darray
     num_embeddings: int = field(static=True)  # vocab size
     embedding_dim: int = field(static=True)
     dtype: DTypeLike = field(static = True)
-    param_dtype: DTypeLike = field(static = True)
 
 
     def __init__(
@@ -36,25 +36,24 @@ class Embedding(eq.Module, strict=True):
         num_embeddings: int,
         embedding_dim: int,
         *,
-        weight_pspec: tp.Optional[P] = None,
-        dtype: tp.Optional[DTypeLike] = None,
-        param_dtype: DTypeLike = jnp.float32,
+        weight_pspec: P | None = None,
+        dtype: DTypeLike | None = None,
         key: PRNGKeyArray,
     ):
 
-        wkey = jax.random.split(key, 1)
-        wvalue = default_init(wkey, (num_embeddings, embedding_dim), param_dtype)
+        wkey, _ = jax.random.split(key, 2)
+        print(f"DEBUGPRINT[24]: _embedding.py:44: wkey={wkey}")
+        wvalue = default_init(wkey, (num_embeddings, embedding_dim), dtype)
 
         self.weight = Darray(wvalue, weight_pspec)
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
 
         self.dtype = dtype or self.weight.value.dtype
-        self.param_dtype = param_dtype 
 
-    def __call__(self, x: Int[ArrayLike]) -> Array:
+    def __call__(self, x: Int[Array, " seq_len"]) -> Array:
         if is_array_like(x) and jnp.shape(x) == ():
-            return self.weight[x]
+            return self.weight.value[x]
         else:
             raise ValueError(
                 "`Embedding()(x)` should be called with a scalar index `x`. "
