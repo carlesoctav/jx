@@ -56,7 +56,6 @@ class Linear(eq.Module):
         *, 
         rngs: PRNGKeyArray | None = None
     ) -> Array:
-        # Handle both Darray and plain JAX arrays
         w = self.weight.value if hasattr(self.weight, 'value') else self.weight
         y =  w @ inputs #(out feat, in_feat) (in_feat, )
         if self.bias is not None:

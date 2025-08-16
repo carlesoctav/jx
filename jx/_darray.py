@@ -32,8 +32,3 @@ def first_from(*args: A | None, error_msg: str) -> A:
       return arg
   raise ValueError(error_msg)
 
-
-def map_variable(
-  module: type[eq.Module]
-)-> type[eq.Module]:
-  pass
