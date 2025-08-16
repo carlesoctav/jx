@@ -1,3 +1,4 @@
+from typing import Literal
 import equinox as eq
 
 import typing as tp
@@ -19,7 +20,7 @@ class Linear(eq.Module):
     bias: Darray | None
     in_features: int = field(static=True)
     out_features: int = field(static=True)
-    bias: bool = field(static=True)
+    bias_enabled: bool = field(static=True)
     dtype: DTypeLike = field(static = True)
 
     def __init__(
@@ -27,9 +28,9 @@ class Linear(eq.Module):
         in_features: int,
         out_features: int,
         *,
-        weight_pspec: tp.Optional[P] = None,
+        weight_pspec = None,
         bias: bool = True,
-        dtype: tp.Optional[DTypeLike] = None,
+        dtype: DTypeLike | None = None,
         key: PRNGKeyArray,
     ):
 
@@ -40,10 +41,12 @@ class Linear(eq.Module):
         if bias:
             bvalue = zeros_init(bkey, (out_features,), dtype=dtype)
             self.bias = Darray(bvalue)
+        else:
+            self.bias = None
 
         self.in_features = in_features
         self.out_features = out_features
-        self.bia = bias
+        self.bias_enabled = bias
         self.dtype = dtype
 
 
@@ -53,9 +56,29 @@ class Linear(eq.Module):
         *, 
         rngs: PRNGKeyArray | None = None
     ) -> Array:
-        w = self.weight.value
+        # Handle both Darray and plain JAX arrays
+        w = self.weight.value if hasattr(self.weight, 'value') else self.weight
         y =  w @ inputs #(out feat, in_feat) (in_feat, )
-        if self.bias:
-            b = self.bias.value
+        if self.bias is not None:
+            b = self.bias.value if hasattr(self.bias, 'value') else self.bias
             y = y + b
         return y
+
+#need to run under shard_map?
+class TPLinear(eq.Module):
+    dense_fn: Linear 
+    model_axis_name: str
+    tp_mode: Literal["scatter", "gather", "none"] = "none"
+    pass
+
+
+    def __init__(
+        in_features: int,
+        out_features: int,
+        *,
+        weight_pspec: P | None = None,
+        bias: bool = True,
+        dtype: DTypeLike | None = None,
+        key: PRNGKeyArray,
+    ):
+        pass

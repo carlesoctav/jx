@@ -1,18 +1,19 @@
-import jax
-
-import typing as tp
 from dataclasses import dataclass, field
-import jax.tree_util as jtu
-from jax import P
+from typing import TypeVar
 
-A = tp.TypeVar('A')
+import equinox as eq
+import jax
+import jax.tree_util as jtu
+
+
+A = TypeVar('A')
 
 
 @jtu.register_dataclass
-@dataclass(slots = True)
+@dataclass(slots = True) #think about this later
 class Darray:
     value: jax.Array
-    pspec: P | None = field(metadata=dict(static=True), default = None)
+    names: str | tuple[str, ...] | None = field(metadata=dict(static=True), default = None)
 
 
 def first_from(*args: A | None, error_msg: str) -> A:
@@ -31,3 +32,8 @@ def first_from(*args: A | None, error_msg: str) -> A:
       return arg
   raise ValueError(error_msg)
 
+
+def map_variable(
+  module: type[eq.Module]
+)-> type[eq.Module]:
+  pass

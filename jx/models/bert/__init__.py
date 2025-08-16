@@ -1,3 +1,3 @@
-from .modeling_bert import BertEmbeddings
+from .modeling_bert import BertEmbeddings, BertAttention, BertEncoder
 
-__all__ = ["BertEmbeddings"]
+__all__ = ["BertEmbeddings", "BertAttention", "BertEncoder"]

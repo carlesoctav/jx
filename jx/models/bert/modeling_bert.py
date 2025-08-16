@@ -76,10 +76,10 @@ class BertEmbeddings(eq.Module):
         embeddings = jax.vmap(self.LayerNorm)(embeddings) 
 
         
-        d_key = jax.random.split(key, 1)[0] if key else None
+        d_key = jax.random.split(key, 1)[0] if key is not None else None
         embeddings = self.dropout(
             embeddings,
-            rngs=d_key,
+            key=d_key,
             inference=inference,
         )
 
@@ -111,17 +111,11 @@ class BertSelfAttention(eq.Module):
                 f"heads ({config.num_attention_heads})"
             )
 
-        if not self.dropout.inference and key is None:
-            raise ValueError(
-                "Dropout is set to non-inference mode, but no rngs were provided." 
-            )
-
         self.num_attention_heads = config.num_attention_heads
         self.attention_head_size = int(config.hidden_size / config.num_attention_heads)
         self.all_head_size = self.num_attention_heads * self.attention_head_size
 
         self.dropout = nn.Dropout(config.hidden_dropout_prob)
-
 
         #array
         self.query = nn.Linear(config.hidden_size, self.all_head_size, key=q_key)
@@ -136,26 +130,30 @@ class BertSelfAttention(eq.Module):
         inference: bool | None = None,
         key: PRNGKeyArray | None = None,
     ) -> Array:
-        seq_length = hidden_states[0]
+        seq_length = hidden_states.shape[0]
         q = jax.vmap(self.query)(hidden_states)
         k = jax.vmap(self.key)(hidden_states)
         v = jax.vmap(self.value)(hidden_states)
 
-        q_heads = q.reshape(-1, self.num_attention_heads, self.attention_head_size)
-        k_heads = k.reshape(-1, self.num_attention_heads, self.attention_head_size)
-        v_heads = v.reshape(-1, self.num_attention_heads, self.attention_head_size)
+        q_heads = q.reshape(seq_length, self.num_attention_heads, self.attention_head_size)
+        k_heads = k.reshape(seq_length, self.num_attention_heads, self.attention_head_size)
+        v_heads = v.reshape(seq_length, self.num_attention_heads, self.attention_head_size)
 
         
-        #TODO: think about attention mask later
-        attn_fn = partial(
-            F.dot_product_attention, dropout=self.dropout, inference=inference
-        )
 
-        keys = jax.random.split(key, self.num_attention_heads) if key else None
+        keys = jax.random.split(key, self.num_attention_heads) if key is not None else None 
+        print(f"DEBUGPRINT[46]: modeling_bert.py:144: keys={keys}")
 
-        attn_heads = jax.vmap(attn_fn,  in_axes=1, out_axes=1)(
-            q_heads, k_heads, v_heads, dropout=self.dropout, key = keys 
-        )
+        if not attention_mask:
+            attn_fn = partial(F.dot_product_attention, mask = attention_mask, dropout = self.dropout, inference = inference)
+            attn_heads = jax.vmap(attn_fn, in_axes = 1, out_axes = 1
+            )(q_heads, k_heads, v_heads, key=keys) # (seq_len,num_attention_heads, attention_head_size) 
+        else:
+            #TODO: Implement attention mask handling
+            raise NotImplementedError(
+                "Attention mask is not implemented in this version."
+            )
+
 
         attn = attn_heads.reshape(seq_length, -1) # seq_len, hidden_size
         return attn
@@ -185,10 +183,10 @@ class BertSelfOutput(eq.Module):
         inference: bool | None = None,
         key: PRNGKeyArray | None = None,
     ):
-        d_key = jax.random.split(key, 1)[0]
+        d_key = jax.random.split(key, 1)[0] if key else None
 
         hidden_states = jax.vmap(self.dense)(hidden_states) 
-        hidden_states = self.dropoout(hidden_states, key = d_key, inference = inference)
+        hidden_states = self.dropout(hidden_states, key = d_key, inference = inference)
         hidden_states = jax.vmap(self.LayerNorm)(hidden_states + input_tensor)
         return hidden_states
 
@@ -227,7 +225,7 @@ class BertAttention(eq.Module):
         key: PRNGKeyArray | None = None,
         inference: bool | None = None,
     ):
-        self_key, output_key = jax.random.split(key, 2) if key else (None, None) 
+        self_key, output_key = jax.random.split(key, 2) if key is not None else (None, None) 
         self_output = self.self(
             hidden_states,
             inference = inference,
@@ -318,7 +316,7 @@ class BertOutput(eq.Module):
             inference = inference,
             key = d_key
         )
-        hidden_states = self.LayerNorm(hidden_states + input_tensor)
+        hidden_states = jax.vmap(self.LayerNorm)(hidden_states + input_tensor)
         return hidden_states
 
 #thinking about layer
@@ -377,8 +375,6 @@ class BertLayer(eq.Module):
 class BertEncoder(eq.Module):
     layer: list[BertLayer]
 
-
-
     def __init__(
         self,
         config: BertConfig, 
@@ -386,9 +382,10 @@ class BertEncoder(eq.Module):
         dtype: jnp.dtype = jnp.float16,
         key: PRNGKeyArray
     ):
-        encoder_key = jax.random.split(key, config.num_hidden_layers)
+        self.layer = []
+        encoder_keys = jax.random.split(key, config.num_hidden_layers)
         for i in range(config.num_hidden_layers):
-            self.layer.append(BertEncoder(config, key = encoder_key[i]))
+            self.layer.append(BertLayer(config, dtype=dtype, rngs=encoder_keys[i]))
 
     def __call__(
         self,
