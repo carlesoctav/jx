@@ -54,30 +54,13 @@ class Linear(eq.Module):
         self,
         inputs: Array,
         *, 
-        rngs: PRNGKeyArray | None = None
+        key: PRNGKeyArray | None = None
     ) -> Array:
-        w = self.weight.value if hasattr(self.weight, 'value') else self.weight
+        w = self.weight.value 
         y =  w @ inputs #(out feat, in_feat) (in_feat, )
         if self.bias is not None:
-            b = self.bias.value if hasattr(self.bias, 'value') else self.bias
+            b = self.bias.value 
             y = y + b
         return y
 
-#need to run under shard_map?
-class TPLinear(eq.Module):
-    dense_fn: Linear 
-    model_axis_name: str
-    tp_mode: Literal["scatter", "gather", "none"] = "none"
-    pass
 
-
-    def __init__(
-        in_features: int,
-        out_features: int,
-        *,
-        weight_pspec: P | None = None,
-        bias: bool = True,
-        dtype: DTypeLike | None = None,
-        key: PRNGKeyArray,
-    ):
-        pass

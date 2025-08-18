@@ -25,7 +25,7 @@ def map_variables(
 
     def _wrap_method(name, orig_fn):
         @ft.wraps(orig_fn)
-        def wrapper(self, *args, **kwargs):
+        def wrapped(self, *args, **kwargs):
             to_map, others = eq.partition(self, where) 
             mapped = map_in_fn(to_map) 
             mapped_self = eq.combine(mapped, others)
@@ -34,7 +34,7 @@ def map_variables(
                 mapped_after = map_out_fn(mapped) 
                 return output, eq.combine(mapped_after, others) 
             return output
-        return wrapper
+        return wrapped
 
     dct = {}
     for m in methods:
