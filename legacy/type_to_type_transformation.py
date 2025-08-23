@@ -116,13 +116,20 @@ def iter_module_type(
     - Path elements are field names (no container indices).
     """
 
+    def _maybe_map(t_owner: type[eq.Module], field_name: str, t_child: type[eq.Module]) -> type[eq.Module]:
+        mapping = getattr(t_owner, "__type_transform_map__", None)
+        if isinstance(mapping, dict):
+            return mapping.get((field_name, t_child), t_child)
+        return t_child
+
     if include_root:
         yield ((), module_type)
 
     def _visit(t: type[eq.Module], path: tuple[str, ...]):
         for name, sub_t in _module_field_types(t):
-            yield (path + (name,), sub_t)
-            yield from _visit(sub_t, path + (name,))
+            mapped_sub_t = _maybe_map(t, name, sub_t)
+            yield (path + (name,), mapped_sub_t)
+            yield from _visit(mapped_sub_t, path + (name,))
 
     yield from _visit(module_type, ())
 
@@ -181,146 +188,48 @@ def transform_module_type_leaves(
         else:
             new_annotations = {}
 
-        is_root = (path == ())
-
-        # If there are no child module transforms and the node's type didn't change
-        # then return the original type (unless it's the root, where we only rename).
-        if not child_type_map and t_trans is t:
-            if is_root:
-                new_name = f"{name_prefix}{t_trans.__name__}"
-                new_cls = type(new_name, (t_trans,), {})
-                cache[key] = new_cls
-                return new_cls
-            else:
-                cache[key] = t
-                return t
-
-        # If leaf_transform changed the type and there are no child transforms,
-        # return the transformed type directly (avoid extra wrapping/name prefix),
-        # except for root where we only prefix the name.
-        if not child_type_map and t_trans is not t:
-            if is_root:
-                new_name = f"{name_prefix}{t_trans.__name__}"
-                new_cls = type(new_name, (t_trans,), {})
-                cache[key] = new_cls
-                return new_cls
-            else:
-                cache[key] = t_trans
-                return t_trans
-
-        # Otherwise, we need a wrapper to coerce children post-init and update annotations.
         def __init__(self, *args, **kwargs):
-            # Construct using the original type's __init__ to preserve semantics
-            t.__init__(self, *args, **kwargs)
-
-            # After construction, coerce children to their mapped transformed types recursively.
-            def _rebuild_instance(inst: eq.Module, new_t: type[eq.Module]) -> eq.Module:
-                new_inst = object.__new__(new_t)
-                if dc.is_dataclass(inst):
-                    for f in dc.fields(type(inst)):
+            import sys
+            class _Patch:
+                def __init__(self, mapping: dict[type[eq.Module], type[eq.Module]]):
+                    self.mapping = mapping
+                    self._saved: list[tuple[object, str, object]] = []
+                def __enter__(self):
+                    mods = list(sys.modules.values())
+                    for m in mods:
+                        d = getattr(m, "__dict__", None)
+                        if not isinstance(d, dict):
+                            continue
+                        for attr, val in list(d.items()):
+                            if isinstance(val, type):
+                                try:
+                                    if issubclass(val, eq.Module) and val in self.mapping:
+                                        new = self.mapping[val]
+                                        self._saved.append((m, attr, val))
+                                        try:
+                                            setattr(m, attr, new)
+                                        except Exception:
+                                            pass
+                                except Exception:
+                                    # Non-class or weird types
+                                    pass
+                    return self
+                def __exit__(self, exc_type, exc, tb):
+                    for mod, name, orig in reversed(self._saved):
                         try:
-                            object.__setattr__(new_inst, f.name, getattr(inst, f.name))
+                            setattr(mod, name, orig)
                         except Exception:
                             pass
-                else:
-                    for k, v in getattr(inst, "__dict__", {}).items():
-                        try:
-                            object.__setattr__(new_inst, k, v)
-                        except Exception:
-                            pass
-                return new_inst
+            # Build a flat type mapping for patching from the child map and cache
+            flat_map: dict[type[eq.Module], type[eq.Module]] = {}
+            for (_, orig), new in child_type_map.items():
+                flat_map[orig] = new
+            for (p, orig), new in cache.items():
+                flat_map[orig] = new
+            with _Patch(flat_map):
+                t.__init__(self, *args, **kwargs)
 
-            def _apply_recursive(owner: eq.Module) -> None:
-                owner_type = type(owner)
-                mapping = getattr(owner_type, "__type_transform_map__", None)
-                if not isinstance(mapping, dict) or not mapping:
-                    return
-                if not dc.is_dataclass(owner):
-                    return
-
-                def _coerce_to(target_t: type[eq.Module], child: eq.Module) -> eq.Module:
-                    if type(child) is target_t:
-                        out = child
-                    elif issubclass(target_t, type(child)):
-                        try:
-                            child.__class__ = target_t
-                            out = child
-                        except Exception:
-                            out = _rebuild_instance(child, target_t)
-                    else:
-                        out = _rebuild_instance(child, target_t)
-                    _apply_recursive(out)
-                    return out
-
-                for f in dc.fields(owner_type):
-                    fname = f.name
-                    try:
-                        v = getattr(owner, fname)
-                    except Exception:
-                        continue
-
-                    if isinstance(v, eq.Module):
-                        target_t = mapping.get((fname, type(v)))
-                        if target_t is not None and type(v) is not target_t:
-                            nv = _coerce_to(target_t, v)
-                            object.__setattr__(owner, fname, nv)
-                        else:
-                            _apply_recursive(v)
-                    elif isinstance(v, list):
-                        changed = False
-                        new_list = []
-                        for x in v:
-                            if isinstance(x, eq.Module):
-                                target_t = mapping.get((fname, type(x)))
-                                if target_t is not None and type(x) is not target_t:
-                                    x2 = _coerce_to(target_t, x)
-                                    new_list.append(x2)
-                                    changed = True
-                                else:
-                                    _apply_recursive(x)
-                                    new_list.append(x)
-                            else:
-                                new_list.append(x)
-                        if changed:
-                            object.__setattr__(owner, fname, new_list)
-                    elif isinstance(v, tuple):
-                        changed = False
-                        new_elems = []
-                        for x in v:
-                            if isinstance(x, eq.Module):
-                                target_t = mapping.get((fname, type(x)))
-                                if target_t is not None and type(x) is not target_t:
-                                    x2 = _coerce_to(target_t, x)
-                                    new_elems.append(x2)
-                                    changed = True
-                                else:
-                                    _apply_recursive(x)
-                                    new_elems.append(x)
-                            else:
-                                new_elems.append(x)
-                        if changed:
-                            object.__setattr__(owner, fname, tuple(new_elems))
-                    elif isinstance(v, dict):
-                        changed = False
-                        new_dict = {}
-                        for k, x in v.items():
-                            if isinstance(x, eq.Module):
-                                target_t = mapping.get((fname, type(x)))
-                                if target_t is not None and type(x) is not target_t:
-                                    x2 = _coerce_to(target_t, x)
-                                    new_dict[k] = x2
-                                    changed = True
-                                else:
-                                    _apply_recursive(x)
-                                    new_dict[k] = x
-                            else:
-                                new_dict[k] = x
-                        if changed:
-                            object.__setattr__(owner, fname, new_dict)
-
-            _apply_recursive(self)
-
-        new_name = f"{name_prefix}{t_trans.__name__}" if is_root else t_trans.__name__
+        new_name = f"{name_prefix}{t_trans.__name__}"
         new_cls = type(new_name, (t_trans,), {
             "__init__": __init__,
             "__annotations__": new_annotations,
@@ -370,3 +279,4 @@ def iter_module(
                         yield from _yield_and_recurse(x, path + (fname, str(k)))
 
     yield from _visit(module, ())
+

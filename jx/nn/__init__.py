@@ -4,7 +4,14 @@ from ._dropout import Dropout
 from ._embedding import Embedding
 from ._layernorm import LayerNorm
 from ._linear import Linear
-from ._transformation import map_variables, HasPredictMethodOutSpecMixin
+from ._transformation import (
+    map_variables,
+    HasPredictMethodOutSpecMixin,
+    iter_module_type,
+    transform_module_type_leaves,
+    has_module_children,
+    iter_module,
+)
 
 import dataclasses
 import jax.tree_util as jtu
@@ -35,6 +42,10 @@ __all__ = [
     "functional",
     "map_variables",
     "param_shapes",
-    "HasPredictMethodOutSpecMixin"
+    "HasPredictMethodOutSpecMixin",
+    "iter_module_type",
+    "transform_module_type_leaves",
+    "has_module_children",
+    "iter_module",
 ]
 
