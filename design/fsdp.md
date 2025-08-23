@@ -28,11 +28,11 @@ train(model, batch)-> model:
 
 
 so let say we have Linear
-then we create FSDPLInear by nn.map_variables() since we're not adding map_out_fn
+then we create FSDPLInear by nn.map_variables() since we're not adding map_out_fn (not needed because the matrix from the all_gather will be remove by the compiler optimazation right)
 how can i capture the sharded state for in_specs and out_specs fo jax.shard_map()
 
-
-we chould simply create a function called get_parition_spec_fsdp that run/imitate this "sharding process"
+we could simply create a function called get_parition_spec_fsdp that run/imitate this "sharding process"
+(see data_parallel ipynb, it needs map_out_fn because of it required the user to input the spec in shard_map, and by adding this map_out_fn and use the init_fsdp with nn.get_parittion_spec) we can get the state spec
 
 but i want this to be composable with other things, like what if we also include TP, we map.variabels(FSDPLinear) on another axis, and try to support TP
 we need to get the same specs and out spec again for this and potentially combining this two things together.
@@ -40,8 +40,8 @@ we need to get the same specs and out spec again for this and potentially combin
 
 if we've map_out_fn but without outputing the modified pytree, 
 
-FSDPTPLinear
-    map_in FSDP (g
+FSDPTPLinear the flow is
+    map_in FSDP 
     map_in TP (just all gather for column wise)
     map_out TP (sharded back this and we can check the partition_spec)
     map_out FSDP (use the shard info from the map_out TP, and collective capture a correct sharding annoatation)
@@ -75,12 +75,72 @@ we want to get their partitionspec
 get_partition_spec(model: eq.Module):
     state = model.get_partition_spec()
 
+
+also this Linear model is actually looks like this:
+
+class Linear(eq.Module):
+    weight: Darray
+    bias: Darray | None
+    in_features: int = field(static=True)
+    out_features: int = field(static=True)
+    bias_enabled: bool = field(static=True)
+    dtype: DTypeLike = field(static = True)
+
+    def __init__(
+        self,
+        in_features: int,
+        out_features: int,
+        *,
+        weight_pspec = None,
+        bias: bool = True,
+        dtype: DTypeLike | None = None,
+        key: PRNGKeyArray,
+    ):
+
+        wkey, bkey = jax.random.split(key, 2)
+        wvalue = default_init(wkey, (out_features, in_features), dtype=dtype)
+        self.weight = Darray(wvalue, weight_pspec)
+
+        if bias:
+            bvalue = zeros_init(bkey, (out_features,), dtype=dtype)
+            self.bias = Darray(bvalue)
+        else:
+            self.bias = None
+
+        self.in_features = in_features
+        self.out_features = out_features
+        self.bias_enabled = bias
+        self.dtype = dtype
+
+
+    def __call__(
+        self,
+        inputs: Array,
+        *, 
+        key: PRNGKeyArray | None = None
+    ) -> Array:
+        w = self.weight.value 
+        y =  w @ inputs #(out feat, in_feat) (in_feat, )
+        if self.bias is not None:
+            b = self.bias.value 
+            y = y + b
+        return y
+
+where
+@jtu.register_dataclass
+@dataclass(slots = True) #think about this later
+class Darray:
+    value: jax.Array
+    names: str | tuple[str, ...] | None = field(metadata=dict(static=True), default = None)
+
+so we can store the names of partitionspec for given module on .names on the darray
+
 another problem, what if we've nested module here
 SuperLinear:
     Linear1:
     linear2:
 
-since we want to use this map_variables on type/class, instead of object we need this iter_module_type(module_type: type[eq.Module]) see how (nnx.Module does this, but remember it' iterate on object instead of type)
+since we want to use this map_variables on type (the  type of the class), instead of object we need this iter_module_type(module_type: type[eq.Module]) see how (nnx.Module does this, but remember it' iterate on object instead of type)
 
 the idea is we create newtype one by one,
 and we use dataclasses.fields(module_type) to extract all the field that suppose to be eq.module 
@@ -89,7 +149,6 @@ field = []
 field_name, type_x in iter_type_module(model_type):
     new_type_x = fully_shard(typex) or tp_shard(type_x) or full_shard(tp_shard(type_x))
     field.append([field_name, type_x])
-
 
 
 make_new_module(model_type, field)
@@ -116,5 +175,5 @@ field_name, type_x in iter_type_module(model_type):
 
 
 make_module(model, field_aware_nested)
-
-you've flax_research and equinox_research to do research for this pattern
+you've flax_research to do research for this pattern
+please implement the similar things on equinox

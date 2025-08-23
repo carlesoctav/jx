@@ -12,8 +12,9 @@ A = TypeVar('A')
 @jtu.register_dataclass
 @dataclass(slots = True) #think about this later
 class Darray:
-    value: jax.Array
-    names: str | tuple[str, ...] | None = field(metadata=dict(static=True), default = None)
+    value: jax.Array  | None
+    pspec: str | tuple[str, ...] | None = field(metadata=dict(static=True), default = None)
+
 
 
 def first_from(*args: A | None, error_msg: str) -> A:
@@ -31,4 +32,5 @@ def first_from(*args: A | None, error_msg: str) -> A:
     if arg is not None:
       return arg
   raise ValueError(error_msg)
+
 

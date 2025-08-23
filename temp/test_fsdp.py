@@ -115,7 +115,7 @@ def shard_params(params: PyTree, axis_name: str, min_weight_size: int = 2**18) -
         if x is None or not isinstance(x, (Darray, jax.Array)):
             return x
         if isinstance(x, Darray):
-            value, names = x.value, x.names
+            value, names = x.value, x.pspec
         else:
             value = x
             names = (None,) * value.ndim
@@ -141,7 +141,7 @@ def shard_params(params: PyTree, axis_name: str, min_weight_size: int = 2**18) -
                         value=lax.dynamic_slice_in_dim(  # Shard to keep on present device.
                             value, axis_idx * split_size, split_size, axis=i
                         ),
-                        names=names[:i] + (axis_name,) + names[i + 1 :],
+                        pspec=names[:i] + (axis_name,) + names[i + 1 :],
                     )
                     return p_sharded
             logging.warning(
@@ -181,8 +181,8 @@ def gather_params(params: PyTree, axis_name: str) -> PyTree:
     corresponding axis name is replaced by None. Unsharded leaves are returned unchanged.
     """
     def _gather(p: Parameter) -> Parameter:
-        if isinstance(p, Darray) and p.names is not None and axis_name in p.names:
-            names = p.names
+        if isinstance(p, Darray) and p.pspec is not None and axis_name in p.pspec:
+            names = p.pspec
             shard_axis = names.index(axis_name)
             gathered = gather_array_with_mean_grads(p.value, axis=shard_axis, axis_name=axis_name)
             new_names = names[:shard_axis] + (None,) + names[shard_axis + 1:]

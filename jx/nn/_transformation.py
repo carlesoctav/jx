@@ -5,23 +5,43 @@ from typing import Any
 
 import equinox as eq
 
+class HasPredictMethodOutSpecMixin:
+    def __predict_out_spec__(self, *args, **kwargs):
+        pass
+  
 
 Pytree = Any
 
 def map_variables(
     cls: type[eq.Module] | eq.Module,
     map_in_fn, 
-    map_out_fn = None,
-    map_name: str = "",
+    predict_spec_fn = None,
+    name: str = "",
     *,
     where = eq.is_array,
-    mutate = False,
     methods = ("__call__",)
 )-> type[eq.Module]:
     if not isinstance(cls, type) or not issubclass(cls, eq.Module):
         raise TypeError("First argument must be a subclass of Module")
-    if mutate and map_out_fn is None:
-        map_out_fn = lambda x: x
+
+    def _wrap_predict_out_spec(prev_predict_spec_fn: Callable | None):
+        """ not need to split/partition the module because we dont compute gradient wrt to pamas to predict the outspec of module"""
+        if not prev_predict_spec_fn:
+            def __predict_out_spec__(self, *args, **kwargs):
+                """the idea is to predict the out_spec given the spec_map_out_fn"""
+                mapped = predict_spec_fn(self, *args, **kwargs)
+                return mapped 
+
+            return __predict_out_spec__
+        else:
+            @ft.wraps(prev_predict_spec_fn)
+            def wrapped(self, *args, **kwargs):
+                mapped = prev_predict_spec_fn(self, *args, **kwargs)
+                mapped = predict_spec_fn(mapped, *args, **kwargs)
+                return mapped 
+
+            return wrapped
+
 
     def _wrap_method(name, orig_fn):
         @ft.wraps(orig_fn)
@@ -30,9 +50,6 @@ def map_variables(
             mapped = map_in_fn(to_map) 
             mapped_self = eq.combine(mapped, others)
             output = orig(mapped_self, *args, **kwargs)
-            if mutate:
-                mapped_after = map_out_fn(mapped) 
-                return output, eq.combine(mapped_after, others) 
             return output
         return wrapped
 
@@ -49,7 +66,15 @@ def map_variables(
 
         dct[m] = _wrap_method(m, func)
 
+    if  predict_spec_fn:
+        predict_out_spec_method = None
+        if hasattr(cls, "__predict_out_spec__"):
+            predict_out_spec_method = getattr(cls, "__predict_out_spec__")
 
-    New = type(f"{cls.__name__}{map_name}", (cls,), dct)
-    New.__doc__ = (cls.__doc__ or "") + f"\n\n[Wrapped for {map_name} by map_variables]"
+        dct["__predict_out_spec__"] = _wrap_predict_out_spec(predict_out_spec_method)
+
+
+    subclasses = (cls, HasPredictMethodOutSpecMixin) if predict_spec_fn else (cls)
+    New = type(f"{name}{cls.__name__}", subclasses, dct)
+    New.__doc__ = (cls.__doc__ or "") + f"\n\n[Wrapped for {name} by map_variables]"
     return New

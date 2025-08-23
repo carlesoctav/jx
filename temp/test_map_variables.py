@@ -19,7 +19,7 @@ def convert_to_bit(
 BitLinear = map_variables(
     Linear,
     map_in_fn=convert_to_bit,
-    map_name = "BitLinear",
+    name = "BitLinear",
     mutate=True
 )
 

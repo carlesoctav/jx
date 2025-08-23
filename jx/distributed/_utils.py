@@ -30,4 +30,3 @@ def install_package(package: str) -> None:
     subprocess.check_call([sys.executable, "-m", "pip", "install", "--quiet", package])
 
 
-simulate_CPU_devices()
